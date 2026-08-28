@@ -1,0 +1,21 @@
+# CMake and compiler output
+/build/
+/out/
+/dist/
+/release/
+/test-output/
+/CMakeUserPresets.json
+
+# IDE and local settings
+/.vs/
+/.vscode/
+*.user
+*.suo
+*.VC.db
+*.VC.VC.opendb
+
+# Logs and temporary files
+*.log
+*.tmp
+Thumbs.db
+Desktop.ini

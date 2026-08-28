@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<qgis version="3.40">
+  <projectlayers>
+    <maplayer><datasource>data/roads.shp|layername=roads</datasource></maplayer>
+    <maplayer source="data/roads.shp|layername=labels" />
+    <maplayer><datasource>one/data.gpkg|layername=one</datasource></maplayer>
+    <maplayer><datasource>two/data.gpkg|layername=two</datasource></maplayer>
+    <maplayer><datasource>file:data/space%20data.csv?type=csv&amp;delimiter=,</datasource></maplayer>
+    <maplayer><datasource>data/photo.tif</datasource></maplayer>
+    <maplayer><datasource>folderdata</datasource></maplayer>
+    <maplayer><datasource>data/missing.shp</datasource></maplayer>
+    <maplayer><datasource>memory?geometry=Point</datasource></maplayer>
+    <maplayer><datasource>https://example.com/service</datasource></maplayer>
+    <maplayer><datasource>crs=EPSG:3857&amp;type=xyz&amp;url=https://tiles.example.com/{z}/{x}/{y}.png</datasource></maplayer>
+    <symbol source="base64:PD94bWw+" />
+  </projectlayers>
+</qgis>

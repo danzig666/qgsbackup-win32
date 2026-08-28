@@ -1,0 +1,11 @@
+OTRT_teljes.gpkg
+magyarorszag_regeszet2025.gpkg
+Natura2000_end2019.gpkg
+*ortofoto*.*
+*.qml
+*.zip
+*.7z
+*.tif
+*.pdf
+*.jpg
+*dxf_GPKG*
