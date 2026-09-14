@@ -14,17 +14,19 @@ The GUI remembers the last destination and the timestamp/skip-file choices under
 qgsbackup.exe "C:\GIS\Ebes.qgz" "D:\Backups" --date
 qgsbackup.exe "C:\GIS\Ebes.qgs" "D:\Backups" --verbose
 qgsbackup.exe "C:\GIS\Ebes.qgz" "D:\Backups" --no-skip-file
+qgsbackup.exe -ns "C:\GIS\Ebes.qgz" "D:\Backup folders\Ebes\\"
 ```
 
 Syntax:
 
 ```text
-qgsbackup <project.qgs|project.qgz> <destination> [-d|--date] [--verbose] [-ns|--no-skip-file]
+qgsbackup [options] <project.qgs|project.qgz> <destination> [options]
 qgsbackup --help
 qgsbackup --version
 ```
 
 CLI timestamping remains off by default for compatibility with the Python program. The GUI defaults it on as the safer interactive choice.
+Backup options may be placed before, between, or after the project and destination. Quoted paths with spaces, Unicode characters, and a trailing backslash are accepted.
 
 Exit codes:
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(qgsbackup VERSION 1.0.1 LANGUAGES C CXX RC)
+project(qgsbackup VERSION 1.0.2 LANGUAGES C CXX RC)
 
 if(NOT WIN32)
   message(FATAL_ERROR "qgsbackup is a native Windows application")

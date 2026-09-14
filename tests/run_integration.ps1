@@ -4,6 +4,8 @@ $fixture = Join-Path $PSScriptRoot 'fixtures\project.qgs'
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ("QgsBackupTests_" + [Guid]::NewGuid().ToString('N'))
 $defaultOutput = Join-Path $testRoot 'default'
 $noSkipOutput = Join-Path $testRoot 'no-skip'
+$quotedOutput = Join-Path $testRoot "S$([char]0x00E1)r$([char]0x00E1)nd digi"
+$optionFirstOutput = Join-Path $testRoot 'option-first'
 
 function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw "Integration test failed: $Message" }
@@ -15,6 +17,11 @@ try {
     Assert-True ($LASTEXITCODE -eq 0) 'default backup returned a failure exit code'
     & $Executable $fixture $noSkipOutput --no-skip-file | Out-Null
     Assert-True ($LASTEXITCODE -eq 0) '--no-skip-file backup returned a failure exit code'
+    # Reproduce a shell/wrapper leaving the closing quote in a Unicode path.
+    & $Executable $fixture ($quotedOutput + '"') | Out-Null
+    Assert-True ($LASTEXITCODE -eq 0) 'backup with a quoted Unicode destination returned a failure exit code'
+    & $Executable -ns $fixture $optionFirstOutput | Out-Null
+    Assert-True ($LASTEXITCODE -eq 0) 'backup with an option before the paths returned a failure exit code'
 
     Assert-True (Test-Path (Join-Path $defaultOutput 'project.qgs')) 'rewritten project is missing'
     Assert-True (Test-Path (Join-Path $defaultOutput 'project.qgd')) 'project-associated file is missing'
@@ -27,6 +34,8 @@ try {
     Assert-True (@(Get-ChildItem (Join-Path $defaultOutput 'layers') -Filter 'data*.gpkg').Count -eq 2) 'basename collision was not resolved'
     Assert-True (Test-Path (Join-Path $noSkipOutput 'layers\photo.tif')) '--no-skip-file did not copy TIF'
     Assert-True (Test-Path (Join-Path $noSkipOutput 'layers\roads.qml')) '--no-skip-file did not copy QML sidecar'
+    Assert-True (Test-Path (Join-Path $quotedOutput 'project.qgs')) 'closing quote was treated as part of the destination path'
+    Assert-True (Test-Path (Join-Path $optionFirstOutput 'layers\photo.tif')) 'option before paths was not applied'
 
     [xml]$project = Get-Content -Raw (Join-Path $defaultOutput 'project.qgs')
     $refs = @($project.SelectNodes('//*[local-name()="datasource"]') | ForEach-Object { $_.InnerText })
