@@ -6,6 +6,14 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Create this tag (e.g. v1.1.0) on the selected commit and publish a release'
+        required: false
+        default: ''
+
+env:
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
 
 permissions:
   contents: write
@@ -28,7 +36,7 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0, 7))" }
+          $version = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { "dev-$($env:GITHUB_SHA.Substring(0, 7))" }
           $package = "qgsbackup-$version-win-x64"
           New-Item -ItemType Directory -Force "release\$package" | Out-Null
           Copy-Item dist\qgsbackup.exe, dist\qgsbackup_skip.txt, README.md "release\$package"
@@ -44,10 +52,12 @@ jobs:
           path: ${{ env.PACKAGE }}
 
       - name: Publish release
-        if: github.ref_type == 'tag'
+        if: env.RELEASE_TAG != ''
         uses: softprops/action-gh-release@v2
         with:
-          name: QGIS Project Backup ${{ github.ref_name }}
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: QGIS Project Backup ${{ env.RELEASE_TAG }}
           files: ${{ env.PACKAGE }}
           body: |
             Changes:
