@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(qgsbackup VERSION 1.0.2 LANGUAGES C CXX RC)
+project(qgsbackup VERSION 1.1.0 LANGUAGES C CXX RC)
 
 if(NOT WIN32)
   message(FATAL_ERROR "qgsbackup is a native Windows application")
@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
 
 add_library(qgsbackup_engine STATIC
-  src/backup_engine.cpp src/filesystem_utils.cpp src/qgis_project.cpp src/wildcard.cpp src/zip_utils.cpp
+  src/backup_engine.cpp src/filesystem_utils.cpp src/localization.cpp src/qgis_project.cpp src/wildcard.cpp src/zip_utils.cpp
   third_party/tinyxml2/tinyxml2.cpp
   third_party/miniz/miniz.c third_party/miniz/miniz_tdef.c third_party/miniz/miniz_tinfl.c third_party/miniz/miniz_zip.c)
 target_include_directories(qgsbackup_engine PUBLIC src third_party/tinyxml2 third_party/miniz)
@@ -41,7 +41,7 @@ add_custom_command(TARGET qgsbackup POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_
   "${CMAKE_SOURCE_DIR}/qgsbackup_skip.txt" "$<TARGET_FILE_DIR:qgsbackup>/qgsbackup_skip.txt")
 
 enable_testing()
-add_executable(qgsbackup_tests tests/tests.cpp src/wildcard.cpp src/qgis_project.cpp src/filesystem_utils.cpp third_party/tinyxml2/tinyxml2.cpp)
+add_executable(qgsbackup_tests tests/tests.cpp src/wildcard.cpp src/qgis_project.cpp src/filesystem_utils.cpp src/localization.cpp third_party/tinyxml2/tinyxml2.cpp)
 target_include_directories(qgsbackup_tests PRIVATE src third_party/tinyxml2)
 target_compile_definitions(qgsbackup_tests PRIVATE UNICODE _UNICODE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(qgsbackup_tests PRIVATE bcrypt ole32)

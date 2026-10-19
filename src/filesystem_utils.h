@@ -1,6 +1,7 @@
 #pragma once
 #include "backup_engine.h"
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -15,7 +16,8 @@ std::wstring md5Prefix(const std::filesystem::path& path);
 std::vector<std::wstring> loadSkipPatterns(const std::filesystem::path& file);
 bool matchesAnyPattern(const std::filesystem::path& path, const std::vector<std::wstring>& patterns);
 bool copyFileStreaming(const std::filesystem::path& source, const std::filesystem::path& destination,
-                       const BackupCallbacks& callbacks, std::uint64_t& bytesCopied);
+                       const BackupCallbacks& callbacks, std::uint64_t& bytesCopied,
+                       const std::function<void()>& onChunk = {});
 std::filesystem::path makeUniqueTempDirectory();
 
 class ScopedTempDirectory {

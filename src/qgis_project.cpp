@@ -1,5 +1,6 @@
 #include "qgis_project.h"
 #include "filesystem_utils.h"
+#include "localization.h"
 #include "tinyxml2.h"
 #include <windows.h>
 #include <algorithm>
@@ -83,10 +84,10 @@ QgisProject::QgisProject(QgisProject&&) noexcept = default;
 QgisProject& QgisProject::operator=(QgisProject&&) noexcept = default;
 
 bool QgisProject::load(const fs::path& file, std::wstring& error) {
-    std::ifstream in(file, std::ios::binary); if (!in) { error = L"Unable to open XML: " + file.native(); return false; }
+    std::ifstream in(file, std::ios::binary); if (!in) { error = tr(L"Unable to open XML: ", L"Nem sikerült megnyitni az XML-t: ") + file.native(); return false; }
     std::string xml((std::istreambuf_iterator<char>(in)), {});
     auto result = document_->Parse(xml.data(), xml.size());
-    if (result != tinyxml2::XML_SUCCESS) { error = L"Malformed QGIS XML: " + utf8ToWide(document_->ErrorStr()); return false; }
+    if (result != tinyxml2::XML_SUCCESS) { error = tr(L"Malformed QGIS XML: ", L"Hibás QGIS XML: ") + utf8ToWide(document_->ErrorStr()); return false; }
     return true;
 }
 
@@ -94,11 +95,11 @@ bool QgisProject::save(const fs::path& file, std::wstring& error) const {
     tinyxml2::XMLPrinter printer(nullptr, false); document_->Print(&printer);
     fs::path temporary = file; temporary += L".tmp";
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
-    if (!out) { error = L"Unable to create project: " + temporary.native(); return false; }
+    if (!out) { error = tr(L"Unable to create project: ", L"Nem sikerült létrehozni a projektet: ") + temporary.native(); return false; }
     out.write(printer.CStr(), static_cast<std::streamsize>(printer.CStrSize() - 1)); out.close();
-    if (!out) { error = L"Unable to write project: " + temporary.native(); return false; }
+    if (!out) { error = tr(L"Unable to write project: ", L"Nem sikerült írni a projektet: ") + temporary.native(); return false; }
     std::error_code ec; fs::remove(file, ec); ec.clear(); fs::rename(temporary, file, ec);
-    if (ec) { fs::remove(temporary); error = L"Unable to commit project: " + file.native() + L" (" + utf8ToWide(ec.message()) + L")"; return false; }
+    if (ec) { fs::remove(temporary); error = tr(L"Unable to commit project: ", L"Nem sikerült véglegesíteni a projektet: ") + file.native() + L" (" + utf8ToWide(ec.message()) + L")"; return false; }
     return true;
 }
 

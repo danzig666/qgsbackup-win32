@@ -9,15 +9,15 @@ STYLE DS_SETFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
 CAPTION "Edit qgsbackup_skip.txt"
 FONT 9, "Segoe UI"
 BEGIN
-  LTEXT "One case-insensitive wildcard pattern per line (* and ? are supported).", -1, 8, 8, 364, 10
+  LTEXT "One case-insensitive wildcard pattern per line (* and ? are supported).", IDC_SKIP_HINT, 8, 8, 364, 10
   EDITTEXT IDC_SKIP_TEXT, 8, 23, 364, 216, ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | WS_HSCROLL | WS_TABSTOP
   DEFPUSHBUTTON "Save", IDOK, 264, 247, 52, 16
   PUSHBUTTON "Cancel", IDCANCEL, 320, 247, 52, 16
 END
 
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,2,0
- PRODUCTVERSION 1,0,2,0
+ FILEVERSION 1,1,0,0
+ PRODUCTVERSION 1,1,0,0
  FILEFLAGSMASK 0x3fL
  FILEOS 0x40004L
  FILETYPE 0x1L
@@ -28,11 +28,11 @@ BEGIN
     BEGIN
       VALUE "CompanyName", "QGIS Backup contributors\0"
       VALUE "FileDescription", "Native QGIS Project Backup\0"
-      VALUE "FileVersion", "1.0.2\0"
+      VALUE "FileVersion", "1.1.0\0"
       VALUE "InternalName", "qgsbackup\0"
       VALUE "OriginalFilename", "qgsbackup.exe\0"
       VALUE "ProductName", "QGIS Project Backup\0"
-      VALUE "ProductVersion", "1.0.2\0"
+      VALUE "ProductVersion", "1.1.0\0"
     END
   END
   BLOCK "VarFileInfo" BEGIN VALUE "Translation", 0x409, 1200 END

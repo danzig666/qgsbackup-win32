@@ -1,0 +1,58 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { "dev-$($env:GITHUB_SHA.Substring(0, 7))" }
+          $package = "qgsbackup-$version-win-x64"
+          New-Item -ItemType Directory -Force "release\$package" | Out-Null
+          Copy-Item dist\qgsbackup.exe, dist\qgsbackup_skip.txt, README.md "release\$package"
+          Compress-Archive -Path "release\$package\*" -DestinationPath "release\$package.zip" -Force
+          $hash = (Get-FileHash "release\$package.zip" -Algorithm SHA256).Hash
+          "PACKAGE=release\$package.zip" | Out-File -Append $env:GITHUB_ENV
+          "SHA256=$hash" | Out-File -Append $env:GITHUB_ENV
+          Write-Output "SHA-256: $hash"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qgsbackup-win-x64
+          path: ${{ env.PACKAGE }}
+
+      - name: Publish release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: QGIS Project Backup ${{ github.ref_name }}
+          files: ${{ env.PACKAGE }}
+          body: |
+            Changes:
+            - The GUI is shown in Hungarian when the Windows region is set to Hungary, otherwise in English (the CLI always stays English)
+            - Copy progress now shows copied size against the total size to copy, with a percentage, and the progress bar follows the copied bytes
+            - The CLI progress line also reports the total size
+
+            The ZIP contains the standalone executable, default skip file, and README. SHA-256: ${{ env.SHA256 }}

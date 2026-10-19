@@ -11,7 +11,7 @@
 namespace qgsbackup {
 namespace {
 void usage() {
-    std::wcout << L"QGIS Project Backup 1.0.2\n\n"
+    std::wcout << L"QGIS Project Backup 1.1.0\n\n"
         L"Usage:\n  qgsbackup [options] <project.qgs|project.qgz> <destination> [options]\n\n"
         L"Options:\n  -d, --date          Create a timestamped destination subfolder\n"
         L"  --verbose           Show detailed logging\n"
@@ -54,7 +54,7 @@ int runCli(int argc, wchar_t** argv) {
         else if (!optionsEnded && arg == L"--verbose") options.verbose = true;
         else if (!optionsEnded && (arg == L"-ns" || arg == L"--no-skip-file")) options.useSkipFile = false;
         else if (!optionsEnded && (arg == L"-h" || arg == L"--help")) { usage(); return 0; }
-        else if (!optionsEnded && arg == L"--version") { std::wcout << L"qgsbackup 1.0.2\n"; return 0; }
+        else if (!optionsEnded && arg == L"--version") { std::wcout << L"qgsbackup 1.1.0\n"; return 0; }
         else if (!optionsEnded && !arg.empty() && arg.front() == L'-') {
             std::wcerr << L"Unknown option: " << arg << L"\n"; return 2;
         } else {
@@ -76,7 +76,9 @@ int runCli(int argc, wchar_t** argv) {
         if (p.totalItems) std::wcout << L"[" << p.currentItem << L"/" << p.totalItems << L"] ";
         std::wcout << stageName(p.stage);
         if (!p.currentSource.empty()) std::wcout << L": " << p.currentSource;
-        std::wcout << L" — " << humanReadableSize(p.bytesCopied) << L" copied\n";
+        std::wcout << L" — " << humanReadableSize(p.bytesCopied);
+        if (p.bytesTotal) std::wcout << L" / " << humanReadableSize(p.bytesTotal);
+        std::wcout << L" copied\n";
     };
     auto result = runBackup(options, callbacks);
     std::wcout << L"\n" << result.message << L"\nDestination: " << result.destination.native()

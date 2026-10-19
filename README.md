@@ -4,7 +4,9 @@
 
 ## Using the GUI
 
-Double-click `qgsbackup.exe`, run it without arguments, or use `qgsbackup.exe --gui`. GUI launches detach immediately, so a terminal prompt is not held open until the window closes. Select a project and destination, choose whether to create a timestamped folder, and start the backup. The **Edit skip list...** button loads `qgsbackup_skip.txt` into an editor and saves it as UTF-8. The work runs on a background thread; progress, copied size, warnings, cancellation, and an **Open backup folder** action are available in the window.
+Double-click `qgsbackup.exe`, run it without arguments, or use `qgsbackup.exe --gui`. GUI launches detach immediately, so a terminal prompt is not held open until the window closes. Select a project and destination, choose whether to create a timestamped folder, and start the backup. The **Edit skip list...** button loads `qgsbackup_skip.txt` into an editor and saves it as UTF-8. The work runs on a background thread; progress, copied size against the total size to copy, warnings, cancellation, and an **Open backup folder** action are available in the window.
+
+The GUI is shown in Hungarian when the Windows region (Settings → Time & language → Region → Country or region) is Hungary, and in English otherwise. The command line is always English.
 
 The GUI remembers the last destination and the timestamp/skip-file choices under `HKCU\Software\QgsBackup`. Cancelling is cooperative. Partial copied data is deliberately retained for inspection; the original project and datasets are never modified.
 
