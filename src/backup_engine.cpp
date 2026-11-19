@@ -2,8 +2,10 @@
 #include "filesystem_utils.h"
 #include "localization.h"
 #include "qgis_project.h"
+#include "wildcard.h"
 #include "zip_utils.h"
 #include <algorithm>
+#include <cwchar>
 #include <cwctype>
 #include <iomanip>
 #include <memory>
@@ -281,17 +283,79 @@ std::optional<fs::path> chooseQgs(const fs::path& extracted, const fs::path& arc
     error = tr(L"The QGZ contains multiple .qgs files and the logical project is ambiguous.", L"A QGZ több .qgs fájlt tartalmaz, nem egyértelmű, melyik a projekt."); return std::nullopt;
 }
 
-enum class SourceKind { None, Virtual, Embedded, Remote, Database, LocalDatabase, Local };
-struct ResolvedSource { SourceKind kind{SourceKind::None}; fs::path path; bool fileUri{false}; std::optional<DbNameValue> db; };
+// GDAL virtual file system path to a layer inside an archive: /vsizip/<archive>/<path inside>,
+// or /vsizip/{<archive>}/<path inside>. /vsigzip/ has no inner path.
+struct ArchiveReference { std::wstring prefix, inner; bool braces{false}; };
+
+bool startsWithInsensitive(const std::wstring& value, const std::wstring& prefix) {
+    return value.size() >= prefix.size() && lower(value.substr(0, prefix.size())) == prefix;
+}
+
+bool isArchiveFile(const fs::path& file) {
+    const auto name = lower(file.filename().native());
+    for (const wchar_t* ext : {L".zip", L".kmz", L".7z", L".rar", L".tar", L".tgz", L".gz"})
+        if (name.size() > wcslen(ext) && name.compare(name.size() - wcslen(ext), wcslen(ext), ext) == 0) return true;
+    return false;
+}
+
+// Skip patterns for a datasource. For an archive that is itself the datasource, extension-only
+// patterns such as *.zip do not apply (they are meant for stray archives beside layers); named
+// patterns still do, and patterns are also matched against the layer inside the archive.
+bool isSkippedDatasource(const RunState& state, const fs::path& source, const std::wstring& inner = {}) {
+    if (!inner.empty() && matchesAnyPattern(fs::path(inner).filename(), state.skipPatterns)) return true;
+    if (!isArchiveFile(source)) return matchesAnyPattern(source, state.skipPatterns);
+    const auto name = source.filename().native();
+    return std::any_of(state.skipPatterns.begin(), state.skipPatterns.end(), [&](const std::wstring& pattern) {
+        const bool extensionOnly = pattern.size() > 2 && pattern.compare(0, 2, L"*.") == 0 &&
+                                   pattern.find_first_of(L"*?", 2) == std::wstring::npos;
+        return !extensionOnly && wildcardMatchInsensitive(name, pattern);
+    });
+}
+
+enum class SourceKind { None, Virtual, Embedded, Remote, Database, LocalDatabase, Archive, Local };
+struct ResolvedSource {
+    SourceKind kind{SourceKind::None}; fs::path path; bool fileUri{false};
+    std::optional<DbNameValue> db; std::optional<ArchiveReference> archive;
+};
+
+std::wstring archiveReference(const ArchiveReference& archive, const std::wstring& path) {
+    return archive.prefix + (archive.braces ? L"{" + path + L"}" : path) + archive.inner;
+}
 
 ResolvedSource resolveSource(const DataSourceReference& ref, const fs::path& projectDirectory) {
     if (isVirtualSource(ref.original)) return {SourceKind::Virtual};
     const bool fileUri = isFileUri(ref.base);
     if (isEmbeddedSource(ref.base)) return {SourceKind::Embedded};
     if (hasNonFileScheme(ref.base) || looksLikeRemoteProvider(ref.original)) return {SourceKind::Remote};
+    auto resolveLocal = [&](const fs::path& p) { return p.is_absolute() ? p : (projectDirectory / p).lexically_normal(); };
+    if (startsWithInsensitive(ref.base, L"/vsi")) {
+        std::wstring prefix;
+        for (const wchar_t* candidate : {L"/vsizip/", L"/vsigzip/", L"/vsitar/", L"/vsi7z/", L"/vsirar/"})
+            if (startsWithInsensitive(ref.base, candidate)) prefix = ref.base.substr(0, wcslen(candidate));
+        // Other GDAL virtual file systems (/vsicurl/, /vsis3/, /vsimem/, ...) are not local files.
+        if (prefix.empty()) return {SourceKind::Remote};
+        const std::wstring rest = ref.base.substr(prefix.size());
+        if (startsWithInsensitive(rest, L"/vsi")) return {SourceKind::Remote}; // e.g. /vsizip//vsicurl/...
+        std::error_code ec;
+        if (!rest.empty() && rest.front() == L'{') {
+            const auto close = rest.find(L'}');
+            if (close == std::wstring::npos) return {SourceKind::Local, resolveLocal(rest)};
+            ArchiveReference archive{prefix, rest.substr(close + 1), true};
+            return {SourceKind::Archive, resolveLocal(rest.substr(1, close - 1)), false, std::nullopt, archive};
+        }
+        // The archive is the shortest leading part of the path that is an existing file.
+        for (std::size_t end = rest.find_first_of(L"/\\"); ; end = rest.find_first_of(L"/\\", end + 1)) {
+            const auto candidate = rest.substr(0, end);
+            if (!candidate.empty() && fs::is_regular_file(resolveLocal(candidate), ec)) {
+                ArchiveReference archive{prefix, end == std::wstring::npos ? L"" : rest.substr(end), false};
+                return {SourceKind::Archive, resolveLocal(candidate), false, std::nullopt, archive};
+            }
+            if (end == std::wstring::npos) break;
+        }
+        return {SourceKind::Local, resolveLocal(rest)}; // reported as missing
+    }
     fs::path source = fileUri ? fileUriToPath(ref.base) : fs::path(ref.base);
     if (source.empty()) return {};
-    auto resolveLocal = [&](const fs::path& p) { return p.is_absolute() ? p : (projectDirectory / p).lexically_normal(); };
     source = resolveLocal(source);
     std::error_code ec;
     if (!fileUri && !fs::exists(source, ec) && looksLikeConnectionString(ref.original)) {
@@ -344,8 +408,10 @@ std::uint64_t estimateTotalBytes(RunState& state, const fs::path& project, const
     for (const auto& ref : refs) {
         if (state.cancelled()) break;
         auto resolved = resolveSource(ref, projectDirectory);
-        if ((resolved.kind != SourceKind::Local && resolved.kind != SourceKind::LocalDatabase) || !fs::exists(resolved.path, ec) || pathsEquivalent(resolved.path, projectDirectory) ||
-            matchesAnyPattern(resolved.path, state.skipPatterns) || !seen.insert(normalizedPathKey(resolved.path)).second) continue;
+        const bool copyable = resolved.kind == SourceKind::Local || resolved.kind == SourceKind::LocalDatabase || resolved.kind == SourceKind::Archive;
+        if (!copyable || !fs::exists(resolved.path, ec) || pathsEquivalent(resolved.path, projectDirectory) ||
+            isSkippedDatasource(state, resolved.path, resolved.archive ? resolved.archive->inner : std::wstring()) ||
+            !seen.insert(normalizedPathKey(resolved.path)).second) continue;
         if (fs::is_directory(resolved.path, ec)) total += directorySize(state, resolved.path);
         else if (fs::is_regular_file(resolved.path, ec)) total += associatedSize(state, resolved.path, counted);
     }
@@ -440,7 +506,7 @@ BackupResult runBackup(const BackupOptions& options, const BackupCallbacks& call
                 continue;
             }
             if (resolved.kind == SourceKind::LocalDatabase) {
-                if (matchesAnyPattern(resolved.path, state.skipPatterns)) {
+                if (isSkippedDatasource(state, resolved.path)) {
                     replacements[ref.original] = replaceDbName(ref.original, *resolved.db, resolved.path.generic_wstring());
                     state.log(LogLevel::Verbose, tr(L"Skipped by pattern; reference kept at original source: ", L"Minta alapján kihagyva; a hivatkozás az eredeti forrásra mutat: ") + resolved.path.native()); continue;
                 }
@@ -449,11 +515,24 @@ BackupResult runBackup(const BackupOptions& options, const BackupCallbacks& call
                 replacements[ref.original] = replaceDbName(ref.original, *resolved.db, L"./" + *relative);
                 continue;
             }
+            if (resolved.kind == SourceKind::Archive) {
+                const auto& archive = *resolved.archive;
+                if (isSkippedDatasource(state, resolved.path, archive.inner)) {
+                    replacements[ref.original] = archiveReference(archive, resolved.path.generic_wstring()) + ref.suffix;
+                    state.log(LogLevel::Verbose, tr(L"Skipped by pattern; reference kept at original source: ", L"Minta alapján kihagyva; a hivatkozás az eredeti forrásra mutat: ") + resolved.path.native()); continue;
+                }
+                auto relative = backupLocal(state, resolved.path);
+                if (!relative) { if (state.cancelled()) return finish(BackupStatus::Cancelled, BackupError::Cancelled, cancelledMessage()); continue; }
+                // "./" makes QGIS resolve the path against the project without requiring it to exist
+                // as a file, which a path inside an archive never does.
+                replacements[ref.original] = archiveReference(archive, L"./" + *relative) + ref.suffix;
+                continue;
+            }
             if (resolved.kind != SourceKind::Local) continue;
             const fs::path& source = resolved.path; const bool fileUri = resolved.fileUri;
             if (!fs::exists(source, ec)) { state.log(LogLevel::Warning, tr(L"Source does not exist:\r\n", L"A forrás nem létezik:\r\n") + source.native()); continue; }
             if (pathsEquivalent(source, projectDirectory)) { state.log(LogLevel::Verbose, tr(L"Skipped project directory: ", L"Projektmappa kihagyva: ") + source.native()); continue; }
-            if (matchesAnyPattern(source, state.skipPatterns)) {
+            if (isSkippedDatasource(state, source)) {
                 replacements[ref.original] = fileUri ? makeAbsoluteFileUri(source) + ref.suffix : source.generic_wstring() + ref.suffix;
                 state.log(LogLevel::Verbose, tr(L"Skipped by pattern; reference kept at original source: ", L"Minta alapján kihagyva; a hivatkozás az eredeti forrásra mutat: ") + source.native()); continue;
             }

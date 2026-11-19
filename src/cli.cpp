@@ -11,7 +11,7 @@
 namespace qgsbackup {
 namespace {
 void usage() {
-    std::wcout << L"QGIS Project Backup 1.1.1\n\n"
+    std::wcout << L"QGIS Project Backup 1.1.2\n\n"
         L"Usage:\n  qgsbackup [options] <project.qgs|project.qgz> <destination> [options]\n\n"
         L"Options:\n  -d, --date          Create a timestamped destination subfolder\n"
         L"  --verbose           Show detailed logging\n"
@@ -54,7 +54,7 @@ int runCli(int argc, wchar_t** argv) {
         else if (!optionsEnded && arg == L"--verbose") options.verbose = true;
         else if (!optionsEnded && (arg == L"-ns" || arg == L"--no-skip-file")) options.useSkipFile = false;
         else if (!optionsEnded && (arg == L"-h" || arg == L"--help")) { usage(); return 0; }
-        else if (!optionsEnded && arg == L"--version") { std::wcout << L"qgsbackup 1.1.1\n"; return 0; }
+        else if (!optionsEnded && arg == L"--version") { std::wcout << L"qgsbackup 1.1.2\n"; return 0; }
         else if (!optionsEnded && !arg.empty() && arg.front() == L'-') {
             std::wcerr << L"Unknown option: " << arg << L"\n"; return 2;
         } else {
