@@ -1,0 +1,77 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Create this tag (e.g. v1.1.0) on the selected commit and publish a release'
+        required: false
+        default: ''
+
+env:
+  RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.release_tag }}
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check release version
+        if: env.RELEASE_TAG != ''
+        shell: pwsh
+        run: |
+          $match = Select-String -Path CMakeLists.txt -Pattern 'project\(qgsbackup VERSION ([0-9.]+)'
+          $version = $match.Matches[0].Groups[1].Value
+          if ($env:RELEASE_TAG -ne "v$version") { throw "Tag $env:RELEASE_TAG does not match the project version v$version in CMakeLists.txt" }
+          if (-not (Test-Path ".github/release-notes/$env:RELEASE_TAG.md")) { throw "Missing release notes: .github/release-notes/$env:RELEASE_TAG.md" }
+
+      - name: Configure
+        run: cmake -S . -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = if ($env:RELEASE_TAG) { $env:RELEASE_TAG } else { "dev-$($env:GITHUB_SHA.Substring(0, 7))" }
+          $package = "qgsbackup-$version-win-x64"
+          New-Item -ItemType Directory -Force "release\$package" | Out-Null
+          Copy-Item dist\qgsbackup.exe, dist\qgsbackup_skip.txt, README.md "release\$package"
+          Compress-Archive -Path "release\$package\*" -DestinationPath "release\$package.zip" -Force
+          $hash = (Get-FileHash "release\$package.zip" -Algorithm SHA256).Hash
+          "PACKAGE=release\$package.zip" | Out-File -Append $env:GITHUB_ENV
+          "SHA256=$hash" | Out-File -Append $env:GITHUB_ENV
+          Write-Output "SHA-256: $hash"
+          if ($env:RELEASE_TAG) {
+            $notes = Get-Content -Raw ".github/release-notes/$env:RELEASE_TAG.md"
+            $notes += "`nThe ZIP contains the standalone executable, default skip file, and README. SHA-256: ``$hash```n"
+            Set-Content -Path release\notes.md -Value $notes -Encoding utf8
+            "NOTES=release\notes.md" | Out-File -Append $env:GITHUB_ENV
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qgsbackup-win-x64
+          path: ${{ env.PACKAGE }}
+
+      - name: Publish release
+        if: env.RELEASE_TAG != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: QGIS Project Backup ${{ env.RELEASE_TAG }}
+          files: ${{ env.PACKAGE }}
+          body_path: ${{ env.NOTES }}

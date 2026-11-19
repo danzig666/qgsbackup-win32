@@ -4,7 +4,9 @@
 
 ## Using the GUI
 
-Double-click `qgsbackup.exe`, run it without arguments, or use `qgsbackup.exe --gui`. GUI launches detach immediately, so a terminal prompt is not held open until the window closes. Select a project and destination, choose whether to create a timestamped folder, and start the backup. The **Edit skip list...** button loads `qgsbackup_skip.txt` into an editor and saves it as UTF-8. The work runs on a background thread; progress, copied size, warnings, cancellation, and an **Open backup folder** action are available in the window.
+Double-click `qgsbackup.exe`, run it without arguments, or use `qgsbackup.exe --gui`. GUI launches detach immediately, so a terminal prompt is not held open until the window closes. Select a project and destination, choose whether to create a timestamped folder, and start the backup. The **Edit skip list...** button loads `qgsbackup_skip.txt` into an editor and saves it as UTF-8. The work runs on a background thread; progress, copied size against the total size to copy, warnings, cancellation, and an **Open backup folder** action are available in the window.
+
+The GUI is shown in Hungarian when the Windows region (Settings → Time & language → Region → Country or region) is Hungary, and in English otherwise. The command line is always English.
 
 The GUI remembers the last destination and the timestamp/skip-file choices under `HKCU\Software\QgsBackup`. Cancelling is cooperative. Partial copied data is deliberately retained for inspection; the original project and datasets are never modified.
 
@@ -42,11 +44,17 @@ Exit codes:
 
 ## Backup behavior
 
-The destination contains the rewritten project, files beside the project that share its basename, the project attachments archive (`<project>_attachments.zip`, always copied regardless of skip patterns), and copied local resources under `layers/`. QGIS provider suffixes such as `|layername=roads` and `?type=csv` are preserved. Shapefile sidecars (`.dbf`, `.shx`, `.prj`, and others) are copied together. Directory datasources are copied recursively. Repeated sources are copied once, while same-named sources from different directories receive a deterministic eight-character MD5 path suffix.
+The destination contains the rewritten project, files beside the project that share its basename, the project attachments archive (`<project>_attachments.zip`, always copied regardless of skip patterns), and copied local resources under `layers/`. QGIS provider suffixes such as `|layername=roads` and `?type=csv` are preserved. Sidecars are copied together with their datasource: files sharing its basename (Shapefile `.dbf`, `.shx`, `.prj`, and others) and files extending its full name (`.tif.aux.xml`, `.tif.ovr`, `.shp.xml`). A SpatiaLite database named by `dbname='...'` is copied and its reference rewritten; server connections (PostGIS, WFS, and similar) are left unchanged. Directory datasources are copied recursively. Repeated sources are copied once, while same-named sources from different directories receive a deterministic eight-character MD5 path suffix.
 
-Remote/database, memory, virtual, and embedded `base64:` sources are left unchanged. Missing local sources produce warnings and are also left unchanged. `.qgz` archives are extracted with ZIP traversal protection, modified, and rebuilt with DEFLATE compression while preserving all archive members.
+Remote, memory, virtual, and embedded `base64:` sources are left unchanged. Missing local sources produce warnings and are also left unchanged. `.qgz` archives are extracted with ZIP traversal protection, modified, and rebuilt with DEFLATE compression while preserving all archive members.
 
 `qgsbackup_skip.txt` is loaded from the executable directory. Patterns are case-insensitive and support `*` and `?`. A matching datasource is not copied; relative references are made absolute so they continue pointing to the original source instead of becoming broken inside the backup. A missing skip file is not an error.
+
+Rewriting the project keeps every value intact, including line breaks and tabs inside attributes (multi-line expressions, map tips) and whitespace-only text. Backing up again into the same destination refreshes all copies.
+
+## Releases
+
+Pushing a tag such as `v1.1.1` runs `.github/workflows/build.yml` on a Windows runner: it builds with MSVC, runs the unit and integration tests, and publishes a GitHub release with `qgsbackup-<tag>-win-x64.zip` (executable, default skip file, README) and its SHA-256. Release notes are taken from `.github/release-notes/<tag>.md`. Every branch push and pull request runs the same build and tests without publishing.
 
 ## Build and test
 
