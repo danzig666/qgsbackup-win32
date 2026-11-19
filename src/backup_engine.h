@@ -25,6 +25,7 @@ struct BackupProgress {
     std::uint64_t bytesTotal{};
     std::wstring currentSource;
     BackupStage stage{BackupStage::OpeningProject};
+    std::wstring detail; // file being copied within the current datasource, e.g. "a0000000a.gdbtable (37/412 files)"
 };
 
 struct BackupOptions {
