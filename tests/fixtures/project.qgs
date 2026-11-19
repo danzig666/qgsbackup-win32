@@ -12,6 +12,10 @@
     <maplayer><datasource>memory?geometry=Point</datasource></maplayer>
     <maplayer><datasource>https://example.com/service</datasource></maplayer>
     <maplayer><datasource>crs=EPSG:3857&amp;type=xyz&amp;url=https://tiles.example.com/{z}/{x}/{y}.png</datasource></maplayer>
+    <maplayer><datasource>dbname='./data/places.sqlite' table="places" (geom)</datasource></maplayer>
+    <maplayer><datasource>dbname='gis' host=localhost port=5432 sslmode=disable key='id' table="public"."roads" (geom)</datasource></maplayer>
     <symbol source="base64:PD94bWw+" />
+    <expression id="multiline" value="CASE&#xA;&#x9;WHEN 1 THEN 'a'&#xD;&#xA;END" />
+    <delimiter> </delimiter>
   </projectlayers>
 </qgis>

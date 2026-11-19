@@ -1,5 +1,6 @@
 #include "zip_utils.h"
 #include "filesystem_utils.h"
+#include "localization.h"
 #include "miniz.h"
 #include <cstdio>
 #include <filesystem>
@@ -21,15 +22,15 @@ static bool safeArchiveName(const fs::path& relative) {
 }
 
 bool extractZipSafely(const fs::path& archive, const fs::path& destination, std::wstring& error) {
-    FILE* input{}; if (_wfopen_s(&input, archive.c_str(), L"rb")) { error = L"Unable to open QGZ: " + archive.native(); return false; }
+    FILE* input{}; if (_wfopen_s(&input, archive.c_str(), L"rb")) { error = tr(L"Unable to open QGZ: ", L"Nem sikerült megnyitni a QGZ-t: ") + archive.native(); return false; }
     _fseeki64(input, 0, SEEK_END); auto size = static_cast<mz_uint64>(_ftelli64(input)); _fseeki64(input, 0, SEEK_SET);
     mz_zip_archive zip{};
-    if (!mz_zip_reader_init_cfile(&zip, input, size, 0)) { fclose(input); error = L"Invalid QGZ archive: " + archive.native(); return false; }
+    if (!mz_zip_reader_init_cfile(&zip, input, size, 0)) { fclose(input); error = tr(L"Invalid QGZ archive: ", L"Érvénytelen QGZ archívum: ") + archive.native(); return false; }
     bool ok = true;
     for (mz_uint i = 0; i < mz_zip_reader_get_num_files(&zip) && ok; ++i) {
         mz_zip_archive_file_stat stat{}; if (!mz_zip_reader_file_stat(&zip, i, &stat)) { ok = false; break; }
         fs::path relative = fs::u8path(stat.m_filename).lexically_normal();
-        if (!safeArchiveName(relative)) { error = L"Unsafe path in QGZ: " + relative.native(); ok = false; break; }
+        if (!safeArchiveName(relative)) { error = tr(L"Unsafe path in QGZ: ", L"Nem biztonságos útvonal a QGZ-ben: ") + relative.native(); ok = false; break; }
         fs::path output = destination / relative;
         if (mz_zip_reader_is_file_a_directory(&zip, i)) { std::error_code ec; fs::create_directories(output, ec); if (ec) ok = false; continue; }
         std::error_code ec; fs::create_directories(output.parent_path(), ec); if (ec) { ok = false; break; }
@@ -37,13 +38,13 @@ bool extractZipSafely(const fs::path& archive, const fs::path& destination, std:
         ok = mz_zip_reader_extract_to_callback(&zip, i, writeFileCallback, target, 0) != 0;
         fclose(target);
     }
-    if (!ok && error.empty()) error = L"Unable to extract QGZ archive: " + archive.native();
+    if (!ok && error.empty()) error = tr(L"Unable to extract QGZ archive: ", L"Nem sikerült kibontani a QGZ archívumot: ") + archive.native();
     mz_zip_reader_end(&zip); fclose(input); return ok;
 }
 
 bool createZipFromDirectory(const fs::path& directory, const fs::path& archive, std::wstring& error) {
     fs::path temporary = archive; temporary += L".tmp";
-    FILE* output{}; if (_wfopen_s(&output, temporary.c_str(), L"w+b")) { error = L"Unable to create QGZ: " + temporary.native(); return false; }
+    FILE* output{}; if (_wfopen_s(&output, temporary.c_str(), L"w+b")) { error = tr(L"Unable to create QGZ: ", L"Nem sikerült létrehozni a QGZ-t: ") + temporary.native(); return false; }
     mz_zip_archive zip{}; bool ok = mz_zip_writer_init_cfile(&zip, output, 0) != 0;
     std::error_code ec;
     for (fs::recursive_directory_iterator it(directory, ec), end; ok && !ec && it != end; it.increment(ec)) {
@@ -57,9 +58,9 @@ bool createZipFromDirectory(const fs::path& directory, const fs::path& archive, 
     }
     if (ok) ok = mz_zip_writer_finalize_archive(&zip) != 0;
     mz_zip_writer_end(&zip); fclose(output);
-    if (!ok || ec) { fs::remove(temporary, ec); error = L"Unable to write QGZ: " + archive.native(); return false; }
+    if (!ok || ec) { fs::remove(temporary, ec); error = tr(L"Unable to write QGZ: ", L"Nem sikerült írni a QGZ-t: ") + archive.native(); return false; }
     fs::remove(archive, ec); ec.clear(); fs::rename(temporary, archive, ec);
-    if (ec) { fs::remove(temporary); error = L"Unable to commit QGZ: " + archive.native(); return false; }
+    if (ec) { fs::remove(temporary); error = tr(L"Unable to commit QGZ: ", L"Nem sikerült véglegesíteni a QGZ-t: ") + archive.native(); return false; }
     return true;
 }
 

@@ -98,7 +98,8 @@ bool matchesAnyPattern(const fs::path& path, const std::vector<std::wstring>& pa
 }
 
 bool copyFileStreaming(const fs::path& source, const fs::path& destination,
-                       const BackupCallbacks& callbacks, std::uint64_t& bytesCopied) {
+                       const BackupCallbacks& callbacks, std::uint64_t& bytesCopied,
+                       const std::function<void()>& onChunk) {
     std::ifstream in(source, std::ios::binary); if (!in) return false;
     fs::create_directories(destination.parent_path());
     DWORD existingAttributes = GetFileAttributesW(destination.c_str());
@@ -110,9 +111,12 @@ bool copyFileStreaming(const fs::path& source, const fs::path& destination,
         if (callbacks.isCancelled && callbacks.isCancelled()) return false;
         in.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
         auto count = in.gcount();
-        if (count > 0) { out.write(buffer.data(), count); if (!out) return false; bytesCopied += static_cast<std::uint64_t>(count); }
+        if (count > 0) { out.write(buffer.data(), count); if (!out) return false; bytesCopied += static_cast<std::uint64_t>(count); if (onChunk) onChunk(); }
     }
-    out.close();
+    // A read error (as opposed to end of file) must not be reported as a complete copy,
+    // and buffered data that cannot be flushed on close (for example, disk full) is a failure.
+    if (in.bad()) return false;
+    out.close(); if (!out) return false;
     std::error_code ec; fs::last_write_time(destination, fs::last_write_time(source, ec), ec);
     DWORD attributes = GetFileAttributesW(source.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES) SetFileAttributesW(destination.c_str(), attributes);

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(qgsbackup VERSION 1.0.2 LANGUAGES C CXX RC)
+project(qgsbackup VERSION 1.1.1 LANGUAGES C CXX RC)
 
 if(NOT WIN32)
   message(FATAL_ERROR "qgsbackup is a native Windows application")
@@ -13,7 +13,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_C_STANDARD 99)
 
 add_library(qgsbackup_engine STATIC
-  src/backup_engine.cpp src/filesystem_utils.cpp src/qgis_project.cpp src/wildcard.cpp src/zip_utils.cpp
+  src/backup_engine.cpp src/filesystem_utils.cpp src/localization.cpp src/qgis_project.cpp src/wildcard.cpp src/zip_utils.cpp
   third_party/tinyxml2/tinyxml2.cpp
   third_party/miniz/miniz.c third_party/miniz/miniz_tdef.c third_party/miniz/miniz_tinfl.c third_party/miniz/miniz_zip.c)
 target_include_directories(qgsbackup_engine PUBLIC src third_party/tinyxml2 third_party/miniz)
@@ -21,7 +21,9 @@ target_compile_definitions(qgsbackup_engine PRIVATE UNICODE _UNICODE NOMINMAX _C
 target_link_libraries(qgsbackup_engine PUBLIC bcrypt ole32)
 
 add_executable(qgsbackup src/main.cpp src/cli.cpp src/gui.cpp src/qgsbackup.rc)
-set_target_properties(qgsbackup PROPERTIES LINK_FLAGS "/MANIFEST:NO")
+if(MSVC)
+  set_target_properties(qgsbackup PROPERTIES LINK_FLAGS "/MANIFEST:NO")
+endif()
 target_compile_definitions(qgsbackup PRIVATE UNICODE _UNICODE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(qgsbackup PRIVATE qgsbackup_engine comctl32 shell32 ole32 uuid)
 
@@ -29,6 +31,12 @@ if(MSVC)
   set_property(TARGET qgsbackup qgsbackup_engine PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   target_compile_options(qgsbackup_engine PRIVATE /W4 /permissive- /utf-8)
   target_compile_options(qgsbackup PRIVATE /W4 /permissive- /utf-8)
+endif()
+
+if(MINGW)
+  # Allows cross-compiling and testing with MinGW-w64; release builds use MSVC.
+  target_compile_options(qgsbackup PRIVATE -municode)
+  target_link_options(qgsbackup PRIVATE -municode -static)
 endif()
 
 set_target_properties(qgsbackup PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/dist")
@@ -41,12 +49,15 @@ add_custom_command(TARGET qgsbackup POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_
   "${CMAKE_SOURCE_DIR}/qgsbackup_skip.txt" "$<TARGET_FILE_DIR:qgsbackup>/qgsbackup_skip.txt")
 
 enable_testing()
-add_executable(qgsbackup_tests tests/tests.cpp src/wildcard.cpp src/qgis_project.cpp src/filesystem_utils.cpp third_party/tinyxml2/tinyxml2.cpp)
+add_executable(qgsbackup_tests tests/tests.cpp src/wildcard.cpp src/qgis_project.cpp src/filesystem_utils.cpp src/localization.cpp third_party/tinyxml2/tinyxml2.cpp)
 target_include_directories(qgsbackup_tests PRIVATE src third_party/tinyxml2)
 target_compile_definitions(qgsbackup_tests PRIVATE UNICODE _UNICODE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(qgsbackup_tests PRIVATE bcrypt ole32)
 if(MSVC)
   set_property(TARGET qgsbackup_tests PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+if(MINGW)
+  target_link_options(qgsbackup_tests PRIVATE -static)
 endif()
 add_test(NAME unit COMMAND qgsbackup_tests)
 add_test(NAME integration COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File

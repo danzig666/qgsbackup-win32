@@ -22,6 +22,7 @@ struct BackupProgress {
     std::size_t currentItem{};
     std::size_t totalItems{};
     std::uint64_t bytesCopied{};
+    std::uint64_t bytesTotal{};
     std::wstring currentSource;
     BackupStage stage{BackupStage::OpeningProject};
 };
@@ -46,6 +47,7 @@ struct BackupResult {
     BackupError error{BackupError::Unknown};
     std::filesystem::path destination;
     std::uint64_t bytesCopied{};
+    std::uint64_t bytesTotal{};
     std::uint64_t filesCopied{};
     std::uint64_t warnings{};
     std::chrono::milliseconds elapsed{};
