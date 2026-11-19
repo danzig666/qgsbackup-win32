@@ -37,8 +37,9 @@ struct RunState {
     }
     bool cancelled() const { return callbacks.isCancelled && callbacks.isCancelled(); }
     void progress(BackupStage stage, std::size_t current = 0, std::size_t total = 0, const std::wstring& source = {}) {
-        last = {current, total, 0, 0, source, stage}; reportBytes();
+        last = {current, total, 0, 0, source, stage, {}}; reportBytes();
     }
+    void setDetail(std::wstring detail) { last.detail = std::move(detail); }
     // Re-sends the last progress with updated byte counters; called while large files stream.
     void reportBytes() {
         if (!callbacks.onProgress) return;
@@ -96,8 +97,10 @@ std::optional<std::wstring> copyAssociatedFiles(RunState& state, const fs::path&
         if (!pathsEquivalent(it->path(), source) && matchesAnyPattern(it->path(), state.skipPatterns)) {
             state.log(LogLevel::Verbose, tr(L"Skipped associated file by pattern: ", L"Kihagyott kapcsolódó fájl (minta alapján): ") + it->path().native()); continue;
         }
+        const bool primary = pathsEquivalent(it->path(), source);
+        state.setDetail(primary ? std::wstring() : it->path().filename().native());
         bool copied = copyOnce(state, it->path(), layers / *targetName);
-        if (pathsEquivalent(it->path(), source)) primaryCopied = copied;
+        if (primary) primaryCopied = copied;
         if (!copied) allCopied = false;
         if (!copied && state.cancelled()) return std::nullopt;
     }
@@ -116,6 +119,14 @@ std::optional<std::wstring> copyDirectory(RunState& state, const fs::path& sourc
     fs::path targetRoot = layers / destinationName; std::error_code ec;
     fs::create_directories(targetRoot, ec);
     if (ec) { state.log(LogLevel::Warning, tr(L"Unable to create directory: ", L"Nem sikerült létrehozni a mappát: ") + targetRoot.native()); return std::nullopt; }
+    // Folder datasources such as a File Geodatabase (.gdb) hold many files; count them so progress
+    // can say which one is being copied and how far along the folder is.
+    std::size_t fileCount = 0, fileIndex = 0;
+    for (fs::recursive_directory_iterator it(source, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
+        if (isBackupDestination(state, *it)) { it.disable_recursion_pending(); continue; }
+        if (it->is_regular_file(ec)) ++fileCount;
+    }
+    ec.clear();
     for (fs::recursive_directory_iterator it(source, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
         if (state.cancelled()) return std::nullopt;
         // When the backup is written inside the datasource folder, never copy the backup into itself.
@@ -126,7 +137,11 @@ std::optional<std::wstring> copyDirectory(RunState& state, const fs::path& sourc
         auto relative = fs::relative(it->path(), source, ec); if (ec) break;
         auto target = targetRoot / relative;
         if (it->is_directory(ec)) fs::create_directories(target, ec);
-        else if (it->is_regular_file(ec) && !copyOne(state, it->path(), target) && state.cancelled()) return std::nullopt;
+        else if (it->is_regular_file(ec)) {
+            ++fileIndex;
+            state.setDetail(relative.native() + L" (" + std::to_wstring(fileIndex) + L"/" + std::to_wstring(std::max(fileCount, fileIndex)) + tr(L" files)", L" fájl)"));
+            if (!copyOne(state, it->path(), target) && state.cancelled()) return std::nullopt;
+        }
         if (ec) break;
     }
     if (ec) { state.log(LogLevel::Warning, tr(L"Directory copy was incomplete: ", L"A mappa másolása hiányos: ") + source.native() + L" (" + utf8ToWide(ec.message()) + L")"); return std::nullopt; }
