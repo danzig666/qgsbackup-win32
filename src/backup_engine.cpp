@@ -88,11 +88,19 @@ std::optional<std::wstring> copyDirectory(RunState& state, const fs::path& sourc
     return (fs::path(L"layers") / destinationName).generic_wstring();
 }
 
+// QGIS stores files attached to a .qgs project in "<project basename>_attachments.zip" beside it.
+// The archive is part of the project itself, so it is always copied, even if a skip pattern matches.
+bool isProjectAttachmentsArchive(const fs::path& file, const fs::path& project) {
+    return lower(file.filename().native()) == lower(project.stem().native() + L"_attachments.zip");
+}
+
 bool copyProjectAssociated(RunState& state, const fs::path& project, const fs::path& destination) {
     std::error_code ec;
     for (fs::directory_iterator it(project.parent_path(), ec), end; !ec && it != end; it.increment(ec)) {
-        if (!it->is_regular_file(ec) || lower(it->path().stem().native()) != lower(project.stem().native()) || pathsEquivalent(it->path(), project)) continue;
-        if (matchesAnyPattern(it->path(), state.skipPatterns)) { state.log(LogLevel::Verbose, L"Skipped project-associated file: " + it->path().native()); continue; }
+        if (!it->is_regular_file(ec) || pathsEquivalent(it->path(), project)) continue;
+        const bool attachments = isProjectAttachmentsArchive(it->path(), project);
+        if (!attachments && lower(it->path().stem().native()) != lower(project.stem().native())) continue;
+        if (!attachments && matchesAnyPattern(it->path(), state.skipPatterns)) { state.log(LogLevel::Verbose, L"Skipped project-associated file: " + it->path().native()); continue; }
         if (!copyOne(state, it->path(), destination / it->path().filename()) && state.cancelled()) return false;
     }
     if (ec) state.log(LogLevel::Warning, L"Unable to enumerate project-associated files: " + utf8ToWide(ec.message()));

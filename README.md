@@ -42,7 +42,7 @@ Exit codes:
 
 ## Backup behavior
 
-The destination contains the rewritten project, files beside the project that share its basename, and copied local resources under `layers/`. QGIS provider suffixes such as `|layername=roads` and `?type=csv` are preserved. Shapefile sidecars (`.dbf`, `.shx`, `.prj`, and others) are copied together. Directory datasources are copied recursively. Repeated sources are copied once, while same-named sources from different directories receive a deterministic eight-character MD5 path suffix.
+The destination contains the rewritten project, files beside the project that share its basename, the project attachments archive (`<project>_attachments.zip`, always copied regardless of skip patterns), and copied local resources under `layers/`. QGIS provider suffixes such as `|layername=roads` and `?type=csv` are preserved. Shapefile sidecars (`.dbf`, `.shx`, `.prj`, and others) are copied together. Directory datasources are copied recursively. Repeated sources are copied once, while same-named sources from different directories receive a deterministic eight-character MD5 path suffix.
 
 Remote/database, memory, virtual, and embedded `base64:` sources are left unchanged. Missing local sources produce warnings and are also left unchanged. `.qgz` archives are extracted with ZIP traversal protection, modified, and rebuilt with DEFLATE compression while preserving all archive members.
 

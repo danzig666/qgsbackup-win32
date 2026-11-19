@@ -25,6 +25,7 @@ try {
 
     Assert-True (Test-Path (Join-Path $defaultOutput 'project.qgs')) 'rewritten project is missing'
     Assert-True (Test-Path (Join-Path $defaultOutput 'project.qgd')) 'project-associated file is missing'
+    Assert-True (Test-Path (Join-Path $defaultOutput 'project_attachments.zip')) 'project attachments archive is missing'
     Assert-True (-not (Test-Path (Join-Path $defaultOutput 'project.qml'))) 'project skip pattern was ignored'
     foreach ($extension in 'shp','shx','dbf','prj') { Assert-True (Test-Path (Join-Path $defaultOutput "layers\roads.$extension")) "Shapefile sidecar .$extension is missing" }
     Assert-True (-not (Test-Path (Join-Path $defaultOutput 'layers\roads.qml'))) 'layer skip pattern was ignored'
