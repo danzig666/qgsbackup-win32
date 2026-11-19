@@ -77,7 +77,36 @@ std::wstring makeAbsoluteFileUri(const fs::path& path) {
     return L"file:///" + encodeUriPath(generic, true);
 }
 
-QgisProject::QgisProject() : document_(std::make_unique<tinyxml2::XMLDocument>()) {}
+namespace {
+// TinyXML2 writes tab, CR and LF inside attribute values literally. Conforming XML parsers,
+// including the one QGIS uses, normalize those characters to spaces when reading the file
+// back, which would silently flatten multi-line expressions, map tips and label rules.
+// This printer writes them as character references so they survive the round trip.
+class FaithfulPrinter : public tinyxml2::XMLPrinter {
+public:
+    FaithfulPrinter() : XMLPrinter(nullptr, false) {}
+    bool VisitEnter(const tinyxml2::XMLElement& element, const tinyxml2::XMLAttribute* attribute) override {
+        const tinyxml2::XMLElement* parent = element.Parent() ? element.Parent()->ToElement() : nullptr;
+        OpenElement(element.Name(), parent ? CompactMode(*parent) : false);
+        std::string out;
+        for (; attribute; attribute = attribute->Next()) {
+            out.assign(" "); out += attribute->Name(); out += "=\"";
+            for (const char* c = attribute->Value(); *c; ++c) {
+                switch (*c) {
+                case '&': out += "&amp;"; break; case '<': out += "&lt;"; break; case '>': out += "&gt;"; break;
+                case '"': out += "&quot;"; break; case '\n': out += "&#xA;"; break; case '\r': out += "&#xD;"; break;
+                case '\t': out += "&#x9;"; break; default: out += *c; break;
+                }
+            }
+            out += '"'; Write(out.data(), out.size());
+        }
+        return true;
+    }
+};
+}
+
+// Whitespace-only text (for example a single-space delimiter) is significant to QGIS.
+QgisProject::QgisProject() : document_(std::make_unique<tinyxml2::XMLDocument>(true, tinyxml2::PEDANTIC_WHITESPACE)) {}
 QgisProject::~QgisProject() = default;
 QgisProject::QgisProject(QgisProject&&) noexcept = default;
 QgisProject& QgisProject::operator=(QgisProject&&) noexcept = default;
@@ -91,7 +120,7 @@ bool QgisProject::load(const fs::path& file, std::wstring& error) {
 }
 
 bool QgisProject::save(const fs::path& file, std::wstring& error) const {
-    tinyxml2::XMLPrinter printer(nullptr, false); document_->Print(&printer);
+    FaithfulPrinter printer; document_->Print(&printer);
     fs::path temporary = file; temporary += L".tmp";
     std::ofstream out(temporary, std::ios::binary | std::ios::trunc);
     if (!out) { error = L"Unable to create project: " + temporary.native(); return false; }

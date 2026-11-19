@@ -21,7 +21,9 @@ target_compile_definitions(qgsbackup_engine PRIVATE UNICODE _UNICODE NOMINMAX _C
 target_link_libraries(qgsbackup_engine PUBLIC bcrypt ole32)
 
 add_executable(qgsbackup src/main.cpp src/cli.cpp src/gui.cpp src/qgsbackup.rc)
-set_target_properties(qgsbackup PROPERTIES LINK_FLAGS "/MANIFEST:NO")
+if(MSVC)
+  set_target_properties(qgsbackup PROPERTIES LINK_FLAGS "/MANIFEST:NO")
+endif()
 target_compile_definitions(qgsbackup PRIVATE UNICODE _UNICODE NOMINMAX _CRT_SECURE_NO_WARNINGS)
 target_link_libraries(qgsbackup PRIVATE qgsbackup_engine comctl32 shell32 ole32 uuid)
 
@@ -29,6 +31,12 @@ if(MSVC)
   set_property(TARGET qgsbackup qgsbackup_engine PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   target_compile_options(qgsbackup_engine PRIVATE /W4 /permissive- /utf-8)
   target_compile_options(qgsbackup PRIVATE /W4 /permissive- /utf-8)
+endif()
+
+if(MINGW)
+  # Allows cross-compiling and testing with MinGW-w64; release builds use MSVC.
+  target_compile_options(qgsbackup PRIVATE -municode)
+  target_link_options(qgsbackup PRIVATE -municode -static)
 endif()
 
 set_target_properties(qgsbackup PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/dist")
@@ -47,6 +55,9 @@ target_compile_definitions(qgsbackup_tests PRIVATE UNICODE _UNICODE NOMINMAX _CR
 target_link_libraries(qgsbackup_tests PRIVATE bcrypt ole32)
 if(MSVC)
   set_property(TARGET qgsbackup_tests PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+if(MINGW)
+  target_link_options(qgsbackup_tests PRIVATE -static)
 endif()
 add_test(NAME unit COMMAND qgsbackup_tests)
 add_test(NAME integration COMMAND powershell -NoProfile -ExecutionPolicy Bypass -File

@@ -19,6 +19,11 @@ struct RunState {
     const BackupCallbacks& callbacks;
     BackupResult result;
     std::vector<std::wstring> skipPatterns;
+    fs::path layers;
+    std::wstring destinationKey;
+    std::unordered_map<std::wstring, std::wstring> seen;        // source key -> "layers/..." reference
+    std::unordered_map<std::wstring, std::wstring> names;       // output name key -> owning source/parent key
+    std::unordered_map<std::wstring, std::wstring> copiedFiles; // source file key -> target file key
 
     void log(LogLevel level, const std::wstring& message) {
         if (level == LogLevel::Verbose && !options.verbose) return;
@@ -47,18 +52,40 @@ bool copyOne(RunState& state, const fs::path& source, const fs::path& destinatio
     return true;
 }
 
+// Copies a file once per run, even when several datasources share sidecars.
+bool copyOnce(RunState& state, const fs::path& source, const fs::path& target) {
+    const auto sourceKey = normalizedPathKey(source), targetKey = normalizedPathKey(target);
+    auto previous = state.copiedFiles.find(sourceKey);
+    if (previous != state.copiedFiles.end() && previous->second == targetKey) return true;
+    if (!copyOne(state, source, target)) return false;
+    state.copiedFiles[sourceKey] = targetKey; return true;
+}
+
+// Sidecars either share the datasource's basename (roads.dbf, roads.prj for roads.shp) or extend
+// its complete filename (photo.tif.aux.xml, photo.tif.ovr, roads.shp.xml). Returns the sidecar's
+// output name for the given datasource output name, or nothing when the file is unrelated.
+std::optional<std::wstring> associatedTargetName(const fs::path& candidate, const fs::path& source, const fs::path& destinationName) {
+    if (lower(candidate.stem().native()) == lower(source.stem().native()))
+        return destinationName.stem().native() + candidate.extension().native();
+    const auto name = candidate.filename().native(), prefix = source.filename().native() + L".";
+    if (name.size() > prefix.size() && lower(name.substr(0, prefix.size())) == lower(prefix))
+        return destinationName.native() + name.substr(source.filename().native().size());
+    return std::nullopt;
+}
+
 std::optional<std::wstring> copyAssociatedFiles(RunState& state, const fs::path& source,
                                                 const fs::path& layers, const fs::path& destinationName) {
     std::error_code ec; fs::create_directories(layers, ec);
     if (ec) { state.log(LogLevel::Warning, L"Unable to create layers folder: " + layers.native()); return std::nullopt; }
     bool primaryCopied = false, allCopied = true;
     for (fs::directory_iterator it(source.parent_path(), ec), end; !ec && it != end; it.increment(ec)) {
-        if (!it->is_regular_file(ec) || lower(it->path().stem().native()) != lower(source.stem().native())) continue;
-        if (matchesAnyPattern(it->path(), state.skipPatterns)) {
+        if (!it->is_regular_file(ec)) continue;
+        auto targetName = associatedTargetName(it->path(), source, destinationName);
+        if (!targetName) continue;
+        if (!pathsEquivalent(it->path(), source) && matchesAnyPattern(it->path(), state.skipPatterns)) {
             state.log(LogLevel::Verbose, L"Skipped associated file by pattern: " + it->path().native()); continue;
         }
-        fs::path target = layers / (destinationName.stem().native() + it->path().extension().native());
-        bool copied = copyOne(state, it->path(), target);
+        bool copied = copyOnce(state, it->path(), layers / *targetName);
         if (pathsEquivalent(it->path(), source)) primaryCopied = copied;
         if (!copied) allCopied = false;
         if (!copied && state.cancelled()) return std::nullopt;
@@ -69,15 +96,21 @@ std::optional<std::wstring> copyAssociatedFiles(RunState& state, const fs::path&
 
 std::optional<std::wstring> copyDirectory(RunState& state, const fs::path& source,
                                           const fs::path& layers, const fs::path& destinationName) {
+    // An existing folder from an earlier backup into the same destination is refreshed, not reused as is.
     fs::path targetRoot = layers / destinationName; std::error_code ec;
-    if (fs::exists(targetRoot, ec)) {
-        state.log(LogLevel::Verbose, L"Directory already exists; reusing: " + targetRoot.native());
-        return (fs::path(L"layers") / destinationName).generic_wstring();
-    }
     fs::create_directories(targetRoot, ec);
     if (ec) { state.log(LogLevel::Warning, L"Unable to create directory: " + targetRoot.native()); return std::nullopt; }
+    // When the backup is written inside the datasource folder, never copy the backup into itself.
+    const auto sourceKey = normalizedPathKey(source);
+    const bool destinationInside = state.destinationKey.size() > sourceKey.size() &&
+        state.destinationKey.compare(0, sourceKey.size(), sourceKey) == 0 &&
+        (state.destinationKey[sourceKey.size()] == L'\\' || state.destinationKey[sourceKey.size()] == L'/');
     for (fs::recursive_directory_iterator it(source, fs::directory_options::skip_permission_denied, ec), end; !ec && it != end; it.increment(ec)) {
         if (state.cancelled()) return std::nullopt;
+        if (destinationInside && it->is_directory(ec) && normalizedPathKey(it->path()) == state.destinationKey) {
+            state.log(LogLevel::Verbose, L"Not copying the backup destination into itself: " + it->path().native());
+            it.disable_recursion_pending(); continue;
+        }
         auto relative = fs::relative(it->path(), source, ec); if (ec) break;
         auto target = targetRoot / relative;
         if (it->is_directory(ec)) fs::create_directories(target, ec);
@@ -111,6 +144,33 @@ std::wstring uniqueName(const fs::path& source) {
     return source.stem().native() + L"_" + md5Prefix(source) + source.extension().native();
 }
 
+// Copies one existing local datasource (file plus sidecars, or a directory) into layers/ and
+// returns its project reference ("layers/..."), or nothing if it could not be copied completely.
+std::optional<std::wstring> backupLocal(RunState& state, const fs::path& source) {
+    std::error_code ec;
+    const auto key = normalizedPathKey(source);
+    if (auto existing = state.seen.find(key); existing != state.seen.end()) return existing->second;
+    const bool directory = fs::is_directory(source, ec);
+    if (!directory && !fs::is_regular_file(source, ec)) return std::nullopt;
+    // Files are written as <stem>.* together with their sidecars, so files from different folders
+    // that share a basename (roads.shp, roads.gpkg) must not share an output stem. Files from the
+    // same folder share their sidecars and can safely share it.
+    fs::path destinationName = source.filename();
+    auto nameKeyOf = [&](const fs::path& name) { return directory ? L"d:" + lower(name.native()) : L"f:" + lower(name.stem().native()); };
+    const auto owner = directory ? key : normalizedPathKey(source.parent_path());
+    std::wstring nameKey = nameKeyOf(destinationName);
+    auto collision = state.names.find(nameKey);
+    if (collision != state.names.end() && collision->second != owner) {
+        destinationName = uniqueName(source); nameKey = nameKeyOf(destinationName);
+        state.log(LogLevel::Verbose, L"Filename collision: " + source.filename().native() + L" -> " + destinationName.native());
+    }
+    state.names[nameKey] = owner;
+    auto relative = directory ? copyDirectory(state, source, state.layers, destinationName)
+                              : copyAssociatedFiles(state, source, state.layers, destinationName);
+    if (relative) state.seen[key] = *relative;
+    return relative;
+}
+
 bool isSupportedProject(const fs::path& p) {
     auto ext = lower(p.extension().native()); return ext == L".qgs" || ext == L".qgz";
 }
@@ -120,6 +180,48 @@ bool looksLikeRemoteProvider(const std::wstring& value) {
     return v.find(L"url=http:") != std::wstring::npos || v.find(L"url=https:") != std::wstring::npos ||
            v.find(L"type=xyz") != std::wstring::npos || v.find(L"type=wms") != std::wstring::npos ||
            v.rfind(L"wms:", 0) == 0 || v.rfind(L"wfs:", 0) == 0 || v.rfind(L"xyz:", 0) == 0;
+}
+
+bool hasConnectionKey(const std::wstring& value, const wchar_t* key) {
+    const auto v = lower(value);
+    return v.rfind(key, 0) == 0 || v.find(std::wstring(L" ") + key) != std::wstring::npos;
+}
+
+// QgsDataSourceUri-style provider strings: dbname='...' host=... table="..." (geom), url='...' typename=...
+bool looksLikeConnectionString(const std::wstring& value) {
+    for (const wchar_t* key : {L"dbname=", L"service=", L"host=", L"url=", L"table=", L"authcfg=", L"typename=", L"layers=", L"contextualwmslegend="})
+        if (hasConnectionKey(value, key)) return true;
+    return false;
+}
+
+// Location of the dbname value inside a connection string, unescaped (QgsDataSourceUri escapes \ and ').
+struct DbNameValue { std::size_t begin{}, end{}; bool quoted{}; std::wstring value; };
+
+std::optional<DbNameValue> findDbName(const std::wstring& connection) {
+    const auto v = lower(connection);
+    std::size_t key = v.rfind(L"dbname=", 0) == 0 ? 0 : v.find(L" dbname=");
+    if (key == std::wstring::npos) return std::nullopt;
+    if (key) ++key;
+    DbNameValue result; result.begin = key + 7;
+    if (result.begin < connection.size() && connection[result.begin] == L'\'') {
+        result.quoted = true; ++result.begin;
+        for (std::size_t i = result.begin; i < connection.size(); ++i) {
+            if (connection[i] == L'\\' && i + 1 < connection.size()) { result.value.push_back(connection[++i]); continue; }
+            if (connection[i] == L'\'') { result.end = i; return result; }
+            result.value.push_back(connection[i]);
+        }
+        return std::nullopt;
+    }
+    result.end = connection.find(L' ', result.begin); if (result.end == std::wstring::npos) result.end = connection.size();
+    result.value = connection.substr(result.begin, result.end - result.begin);
+    return result;
+}
+
+std::wstring replaceDbName(const std::wstring& connection, const DbNameValue& db, const std::wstring& value) {
+    std::wstring escaped;
+    for (wchar_t c : value) { if (c == L'\\' || c == L'\'') escaped.push_back(L'\\'); escaped.push_back(c); }
+    if (!db.quoted) escaped = L"'" + escaped + L"'";
+    return connection.substr(0, db.begin) + escaped + connection.substr(db.end);
 }
 
 bool isVirtualSource(const std::wstring& value) {
@@ -137,6 +239,7 @@ std::wstring progressDescription(const DataSourceReference& ref) {
     if (isVirtualSource(ref.original)) return L"virtual layer";
     if (hasNonFileScheme(ref.base)) return L"remote resource";
     if (looksLikeRemoteProvider(ref.original)) return L"remote layer";
+    if (looksLikeConnectionString(ref.original)) return L"database or service layer";
     auto name = fs::path(ref.base).filename().native();
     return name.empty() ? L"local resource" : name;
 }
@@ -215,9 +318,11 @@ BackupResult runBackup(const BackupOptions& options, const BackupCallbacks& call
         auto refs = xml.references(); state.log(LogLevel::Info, L"Found " + std::to_wstring(refs.size()) + L" unique datasource references.");
         state.progress(BackupStage::ScanningResources, 0, refs.size());
 
-        std::unordered_map<std::wstring, std::wstring> replacements, seen, names;
+        std::unordered_map<std::wstring, std::wstring> replacements;
         std::size_t remotePreserved = 0, embeddedPreserved = 0, virtualPreserved = 0;
-        fs::path projectDirectory = project.parent_path(); fs::path layers = destination / L"layers";
+        fs::path projectDirectory = project.parent_path(); state.layers = destination / L"layers";
+        state.destinationKey = normalizedPathKey(destination);
+        auto resolveLocal = [&](const fs::path& p) { return p.is_absolute() ? p : (projectDirectory / p).lexically_normal(); };
         for (std::size_t i = 0; i < refs.size(); ++i) {
             if (state.cancelled()) return finish(BackupStatus::Cancelled, BackupError::Cancelled, L"Backup cancelled.");
             const auto& ref = refs[i]; state.progress(BackupStage::CopyingFiles, i + 1, refs.size(), progressDescription(ref));
@@ -235,32 +340,40 @@ BackupResult runBackup(const BackupOptions& options, const BackupCallbacks& call
             }
             fs::path source = fileUri ? fileUriToPath(ref.base) : fs::path(ref.base);
             if (source.empty()) continue;
-            if (!source.is_absolute()) source = (projectDirectory / source).lexically_normal();
+            source = resolveLocal(source);
+            if (!fileUri && !fs::exists(source, ec) && looksLikeConnectionString(ref.original)) {
+                // Database/service connection. A local database file named by dbname (SpatiaLite)
+                // is backed up; server connections are preserved unchanged.
+                auto db = findDbName(ref.original);
+                fs::path dbFile = db && !db->value.empty() && !hasConnectionKey(ref.original, L"host=") && !hasConnectionKey(ref.original, L"service=")
+                    ? resolveLocal(fs::path(db->value)) : fs::path();
+                if (dbFile.empty() || !fs::is_regular_file(dbFile, ec)) {
+                    ++remotePreserved;
+                    state.log(LogLevel::Verbose, L"Left database or service datasource unchanged: " + abbreviated(ref.original));
+                    continue;
+                }
+                if (matchesAnyPattern(dbFile, state.skipPatterns)) {
+                    replacements[ref.original] = replaceDbName(ref.original, *db, dbFile.generic_wstring());
+                    state.log(LogLevel::Verbose, L"Skipped by pattern; reference kept at original database: " + dbFile.native()); continue;
+                }
+                auto relative = backupLocal(state, dbFile);
+                if (!relative) { if (state.cancelled()) return finish(BackupStatus::Cancelled, BackupError::Cancelled, L"Backup cancelled."); continue; }
+                replacements[ref.original] = replaceDbName(ref.original, *db, L"./" + *relative);
+                continue;
+            }
             if (!fs::exists(source, ec)) { state.log(LogLevel::Warning, L"Source does not exist:\r\n" + source.native()); continue; }
             if (pathsEquivalent(source, projectDirectory)) { state.log(LogLevel::Verbose, L"Skipped project directory: " + source.native()); continue; }
             if (matchesAnyPattern(source, state.skipPatterns)) {
                 replacements[ref.original] = fileUri ? makeAbsoluteFileUri(source) + ref.suffix : source.generic_wstring() + ref.suffix;
                 state.log(LogLevel::Verbose, L"Skipped by pattern; reference kept at original source: " + source.native()); continue;
             }
-            const auto key = normalizedPathKey(source);
-            auto existing = seen.find(key);
-            if (existing != seen.end()) { replacements[ref.original] = fileUri ? makeRelativeFileUri(existing->second) + ref.suffix : existing->second + ref.suffix; continue; }
-            fs::path destinationName = source.filename(); std::wstring nameKey = lower(destinationName.native());
-            auto collision = names.find(nameKey);
-            if (collision != names.end() && collision->second != key) {
-                destinationName = uniqueName(source); nameKey = lower(destinationName.native());
-                state.log(LogLevel::Verbose, L"Filename collision: " + source.filename().native() + L" -> " + destinationName.native());
-            }
-            names[nameKey] = key;
-            std::optional<std::wstring> relative;
-            if (fs::is_directory(source, ec)) relative = copyDirectory(state, source, layers, destinationName);
-            else if (fs::is_regular_file(source, ec)) relative = copyAssociatedFiles(state, source, layers, destinationName);
+            auto relative = backupLocal(state, source);
             if (!relative) { if (state.cancelled()) return finish(BackupStatus::Cancelled, BackupError::Cancelled, L"Backup cancelled."); continue; }
-            seen[key] = *relative; replacements[ref.original] = fileUri ? makeRelativeFileUri(*relative) + ref.suffix : *relative + ref.suffix;
+            replacements[ref.original] = fileUri ? makeRelativeFileUri(*relative) + ref.suffix : *relative + ref.suffix;
         }
 
         if (remotePreserved || embeddedPreserved || virtualPreserved) {
-            state.log(LogLevel::Info, L"Preserved unchanged: " + std::to_wstring(remotePreserved) + L" remote, " +
+            state.log(LogLevel::Info, L"Preserved unchanged: " + std::to_wstring(remotePreserved) + L" remote/database, " +
                       std::to_wstring(embeddedPreserved) + L" embedded, " + std::to_wstring(virtualPreserved) + L" virtual references.");
         }
 
