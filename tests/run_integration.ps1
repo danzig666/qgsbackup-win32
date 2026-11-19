@@ -37,6 +37,7 @@ try {
     Assert-True (Test-Path (Join-Path $noSkipOutput 'layers\roads.qml')) '--no-skip-file did not copy QML sidecar'
     Assert-True (Test-Path (Join-Path $noSkipOutput 'layers\photo.tif.aux.xml')) 'full-filename sidecar (.tif.aux.xml) is missing'
     Assert-True (Test-Path (Join-Path $defaultOutput 'layers\places.sqlite')) 'SpatiaLite database named by dbname was not copied'
+    Assert-True (Test-Path (Join-Path $defaultOutput 'layers\zipped.zip')) 'zipped layer archive was not copied (the default *.zip skip pattern must not apply to it)'
     Assert-True (Test-Path (Join-Path $quotedOutput 'project.qgs')) 'closing quote was treated as part of the destination path'
     Assert-True (Test-Path (Join-Path $optionFirstOutput 'layers\photo.tif')) 'option before paths was not applied'
 
@@ -60,6 +61,10 @@ try {
     Assert-True ($refs -contains "dbname='./layers/places.sqlite' table=`"places`" (geom)") 'SpatiaLite dbname was not rewritten to the copy'
     Assert-True ($refs -contains "dbname='gis' host=localhost port=5432 sslmode=disable key='id' table=`"public`".`"roads`" (geom)") 'database connection was changed'
     Assert-True ($defaultLog -notmatch 'host=localhost') 'database connection was reported as a missing file'
+    Assert-True ($refs -contains '/vsizip/./layers/zipped.zip/inner/points.csv') 'zipped layer reference was not rewritten to the copied archive'
+    Assert-True ($refs -contains '/vsizip/{./layers/zipped.zip}/inner/points.csv|layername=points') 'braced zipped layer reference or its suffix was not rewritten'
+    Assert-True ($refs -contains '/vsicurl/https://example.com/remote.tif') 'remote GDAL virtual file was changed'
+    Assert-True ($defaultLog -notmatch 'vsicurl') 'remote GDAL virtual file was reported as a missing file'
     $expression = $project.SelectSingleNode('//expression[@id="multiline"]').GetAttribute('value')
     Assert-True ($expression -eq "CASE`n`tWHEN 1 THEN 'a'`r`nEND") 'line breaks or tabs in an attribute were not preserved'
     Assert-True ($project.SelectSingleNode('//delimiter').InnerText -eq ' ') 'whitespace-only element text was not preserved'
